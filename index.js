@@ -144,7 +144,6 @@ async function summarize(link, post_into_chat = false) {
 
         sendMessageAs({ name: context.name2 }, summary);
     } catch (err) {
-        console.log("ytdlp", err)
         // TODO: fallback to whisper streaming with yt-dlp
         toastr.error("Could not load transcript from youtube")
     }
