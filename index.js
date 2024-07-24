@@ -1,7 +1,7 @@
 import { registerSlashCommand, sendMessageAs } from "../../../slash-commands.js";
 import { getContext } from "../../../extensions.js";
 import { eventSource, event_types } from "../../../../script.js";
-import { amount_gen, generateRaw, updateMessageBlock } from "../../../../script.js"
+import { amount_gen, generateRaw, updateMessageBlock, getRequestHeaders } from "../../../../script.js"
 
 const SUMMARY_TEMPLATE = "Summarize the following youtube video in a few sentences, only keep key point information, do not explain or elaborate, do not use bulletpoints";
 
@@ -24,77 +24,19 @@ function chunkMessage(str, length) {
 }
 
 async function getTranscript(id) {
-    const RE_XML_TRANSCRIPT = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
-    const lang = "en"; // feel free to PR a second argument to the slash command, I'm only interested in "en"
-    const useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.3"
-
-    if (!id) {
-        console.log('Id is required for /transcript');
-        return response.sendStatus(400);
-    }
-
-    const videoPageResponse = await fetch(`https://corsproxy.io/?https://www.youtube.com/watch?v=${id}`, {
-        headers: {
-            ...(lang && { 'Accept-Language': lang }),
-            'User-Agent': useragent,
-        },
+    const result = await fetch('/api/serpapi/transcript', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ id, lang: "en" }),
     });
 
-    const videoPageBody = await videoPageResponse.text();
-    const splittedHTML = videoPageBody.split('"captions":');
-
-    if (splittedHTML.length <= 1) {
-        if (videoPageBody.includes('class="g-recaptcha"')) {
-            throw new Error('Too many requests');
-        }
-        if (!videoPageBody.includes('"playabilityStatus":')) {
-            throw new Error('Video is not available');
-        }
-        throw new Error('Transcript not available');
+    if (!result.ok) {
+        const error = await result.text();
+        toastr.error(error)
     }
 
-    const captions = (() => {
-        try {
-            return JSON.parse(splittedHTML[1].split(',"videoDetails')[0].replace('\n', ''));
-        } catch (e) {
-            return undefined;
-        }
-    })()?.['playerCaptionsTracklistRenderer'];
-
-    if (!captions) {
-        throw new Error('Transcript disabled');
-    }
-
-    if (!('captionTracks' in captions)) {
-        throw new Error('Transcript not available');
-    }
-
-    if (lang && !captions.captionTracks.some(track => track.languageCode === lang)) {
-        throw new Error('Transcript not available in this language');
-    }
-
-    const transcriptURL = (lang ? captions.captionTracks.find(track => track.languageCode === lang) : captions.captionTracks[0]).baseUrl;
-    const transcriptResponse = await fetch("https://corsproxy.io/?" + transcriptURL, {
-        headers: {
-            ...(lang && { 'Accept-Language': lang }),
-            'User-Agent': useragent,
-        },
-    });
-
-    if (!transcriptResponse.ok) {
-        throw new Error('Transcript request failed');
-    }
-
-    const transcriptBody = await transcriptResponse.text();
-    const results = [...transcriptBody.matchAll(RE_XML_TRANSCRIPT)];
-    const transcript = results.map((result) => ({
-        text: result[3],
-        duration: parseFloat(result[2]),
-        offset: parseFloat(result[1]),
-        lang: lang ?? captions.captionTracks[0].languageCode,
-    }));
-
-    return transcript.map(x => x.text).join(" ")
+    const transcript = await result.text();
+    return transcript
 }
 
 async function summarizeChunks(text, chunkLength) {
